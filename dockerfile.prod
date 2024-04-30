@@ -1,0 +1,53 @@
+# Dependencias
+FROM node:21-alpine3.19 as deps
+
+WORKDIR /usr/src/app
+
+COPY package.json ./
+COPY package-lock.json ./
+
+RUN npm install
+
+# Builder
+FROM node:21-alpine3.19 as build
+
+WORKDIR /usr/src/app
+
+# Copy node_modules from deps
+COPY --from=deps /usr/src/app/node_modules ./node_modules
+
+# Copy the rest of the files
+COPY . .
+
+
+# Pass the build argument to the environment variable
+ARG ORDERS_DATABASE_URL
+ENV DATABASE_URL=$ORDERS_DATABASE_URL
+
+# RUN prisma migrations and client
+RUN npx prisma migrate deploy
+RUN npx prisma generate
+
+# RUN npm run test
+RUN npm run build
+
+RUN npm ci -f --only=production && npm cache clean --force
+
+# Create final Docker Image
+FROM node:21-alpine3.19 as prod
+
+WORKDIR /usr/src/app
+
+# Copy node_modules from build
+COPY --from=build /usr/src/app/node_modules ./node_modules
+
+# Copy the dist folder from build
+COPY --from=build /usr/src/app/dist ./dist
+
+ENV NODE_ENV=production
+
+USER node
+
+EXPOSE 3000
+
+CMD [ "node", "dist/main.js" ]
